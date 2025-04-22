@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Arcade Space Shooter</title>
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+  <style>
+    body {
+      margin: 0;
+      background: #000;
+      font-family: 'Press Start 2P', cursive;
+      color: #0ff;
+      text-shadow: 0 0 5px #0ff, 0 0 10px #0ff;
+      overflow: hidden;
+    }
+    #ui {
+      position: absolute;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      text-align: center;
+      z-index: 10;
+      font-size: 14px;
+    }
+    #restartBtn {
+      display: none;
+      margin-top: 20px;
+      padding: 10px 20px;
+      background: #111;
+      border: 2px solid #0ff;
+      color: #0ff;
+      font-family: 'Press Start 2P', cursive;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    #restartBtn:hover {
+      background: #0ff;
+      color: #000;
+    }
+    #playBtn {
+      padding: 10px 20px;
+      background: #111;
+      border: 2px solid #0ff;
+      color: #0ff;
+      font-family: 'Press Start 2P', cursive;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    #playBtn:hover {
+      background: #0ff;
+      color: #000;
+    }
+    canvas {
+      display: block;
+      margin: 80px auto 0;
+      border: 8px solid #0ff;
+      box-shadow: 0 0 20px #0ff, 0 0 40px #00f inset;
+      background: #000;
+    }
+    .links {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      font-family: 'Press Start 2P', cursive;
+    }
+    .links a {
+      color: #0ff;
+      margin-left: 20px;
+      text-decoration: none;
+      font-size: 14px;
+    }
+    .links a:hover {
+      color: #fff;
+    }
+  </style>
+</head>
+<body>
+  <div id="ui">
+    Score: <span id="score">0</span> | High Score: <span id="highScore">0</span> | Lives: <span id="lives">3</span><br>
+    <button id="restartBtn">RESTART</button>
+    <button id="playBtn">PLAY</button>
+  </div>
+
+  <div class="links">
+    <a href="index.html">Resume</a>
+    <a href="Scratch.html">Scratch Page</a>
+    <a href="webapp.html">Web App Page</a>
+  </div>
+
+  <canvas id="gameCanvas" width="600" height="800"></canvas>
+
+  <script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const scoreEl = document.getElementById('score');
+    const highScoreEl = document.getElementById('highScore');
+    const livesEl = document.getElementById('lives');
+    const restartBtn = document.getElementById('restartBtn');
+    const playBtn = document.getElementById('playBtn');
+
+    let keys = {};
+    let lasers = [];
+    let enemyLasers = [];
+    let enemies = [];
+    let bombs = [];
+    let score = 0;
+    let highScore = 0; // resets every reload
+    let lives = 3;
+    let gameOver = false;
+    let enemySpeed = 1.2;
+    let enemySpawnRate = 2000;
+
+    highScoreEl.textContent = highScore;
+
+    const ship = {
+      x: canvas.width / 2 - 20,
+      y: canvas.height - 60,
+      width: 40,
+      height: 40,
+      speed: 6,
+      cooldown: 0
+    };
+
+    function drawShip() {
+      ctx.fillStyle = '#0ff';
+      ctx.beginPath();
+      ctx.moveTo(ship.x + ship.width / 2, ship.y);
+      ctx.lineTo(ship.x, ship.y + ship.height);
+      ctx.lineTo(ship.x + ship.width, ship.y + ship.height);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    function drawLaser(laser, color = 'red') {
+      ctx.fillStyle = color;
+      ctx.fillRect(laser.x, laser.y, 4, 10);
+    }
+
+    function drawEnemy(enemy) {
+      ctx.fillStyle = enemy.type === 'circle' ? 'yellow' :
+                      enemy.type === 'square' ? 'lime' :
+                      'magenta';
+      if (enemy.type === 'circle') {
+        ctx.beginPath();
+        ctx.arc(enemy.x + enemy.size / 2, enemy.y + enemy.size / 2, enemy.size / 2, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (enemy.type === 'square') {
+        ctx.fillRect(enemy.x, enemy.y, enemy.size, enemy.size);
+      } else if (enemy.type === 'diamond') {
+        ctx.beginPath();
+        ctx.moveTo(enemy.x + enemy.size / 2, enemy.y);
+        ctx.lineTo(enemy.x + enemy.size, enemy.y + enemy.size / 2);
+        ctx.lineTo(enemy.x + enemy.size / 2, enemy.y + enemy.size);
+        ctx.lineTo(enemy.x, enemy.y + enemy.size / 2);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+
+    function drawBomb(bomb) {
+      ctx.fillStyle = 'orange';
+      ctx.beginPath();
+      ctx.arc(bomb.x, bomb.y, 10, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    function fireLaser() {
+      if (ship.cooldown <= 0) {
+        lasers.push({ x: ship.x + 5, y: ship.y, speed: 8 });
+        lasers.push({ x: ship.x + ship.width - 9, y: ship.y, speed: 8 });
+        ship.cooldown = 15;
+      }
+    }
+
+    function spawnEnemy() {
+      const rand = Math.random();
+      if (rand < 0.1) {
+        // Spawn bomb (10% chance)
+        bombs.push({
+          x: Math.random() * (canvas.width - 20) + 10,
+          y: -20,
+          speed: 2
+        });
+        return;
+      }
+
+      let type = rand < 0.4 ? 'circle' : rand < 0.8 ? 'square' : 'diamond';
+      let size = type === 'square' ? 35 : 30;
+      let speed = type === 'circle' ? enemySpeed + 1.5 : enemySpeed;
+      let health = type === 'square' ? 3 : type === 'diamond' ? 2 : 1;
+
+      enemies.push({
+        x: Math.random() * (canvas.width - size),
+        y: -size,
+        size,
+        speed,
+        health,
+        type,
+        shootCooldown: type === 'diamond' ? Math.random() * 100 + 100 : null
+      });
+    }
+
+    function update() {
+      if (gameOver) return;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // Move ship
+      if ((keys['ArrowLeft'] || keys['a']) && ship.x > 0) ship.x -= ship.speed;
+      if ((keys['ArrowRight'] || keys['d']) && ship.x + ship.width < canvas.width) ship.x += ship.speed;
+      if ((keys['ArrowUp'] || keys['w']) && ship.y > 0) ship.y -= ship.speed;
+      if ((keys['ArrowDown'] || keys['s']) && ship.y + ship.height < canvas.height) ship.y += ship.speed;
+      if (keys[' '] || keys['Spacebar']) fireLaser();
+      if (ship.cooldown > 0) ship.cooldown--;
+
+      // Player lasers
+      lasers = lasers.filter(l => l.y > 0);
+      lasers.forEach((laser, i) => {
+        laser.y -= laser.speed;
+        drawLaser(laser);
+
+        enemies.forEach((enemy, j) => {
+          if (laser.x < enemy.x + enemy.size &&
+              laser.x + 4 > enemy.x &&
+              laser.y < enemy.y + enemy.size &&
+              laser.y + 10 > enemy.y) {
+            enemy.health--;
+            lasers.splice(i, 1);
+            if (enemy.health <= 0) {
+              enemies.splice(j, 1);
+              score += 10;
+              scoreEl.textContent = score;
+            }
+          }
+        });
+
+        bombs.forEach((bomb, k) => {
+          const dist = Math.hypot(laser.x - bomb.x, laser.y - bomb.y);
+          if (dist < 10) {
+            bombs.splice(k, 1);
+            lasers.splice(i, 1);
+            enemies = []; // Bomb clears screen
+          }
+        });
+      });
+
+      // Enemy update
+      enemies.forEach((enemy, i) => {
+        enemy.y += enemy.speed;
+
+        if (enemy.type === 'diamond') {
+          enemy.shootCooldown--;
+          if (enemy.shootCooldown <= 0) {
+            enemyLasers.push({
+              x: enemy.x + enemy.size / 2 - 2,
+              y: enemy.y + enemy.size,
+              speed: 5
+            });
+            enemy.shootCooldown = Math.random() * 100 + 100;
+          }
+        }
+
+        if (
+          enemy.x < ship.x + ship.width &&
+          enemy.x + enemy.size > ship.x &&
+          enemy.y < ship.y + ship.height &&
+          enemy.y + enemy.size > ship.y
+        ) {
+          enemies.splice(i, 1);
+          loseLife();
+        }
+
+        if (enemy.y > canvas.height) {
+          enemies.splice(i, 1);
+          loseLife();
+        }
+
+        drawEnemy(enemy);
+      });
+
+      // Enemy lasers
+      enemyLasers = enemyLasers.filter(l => l.y < canvas.height);
+      enemyLasers.forEach((laser, i) => {
+        laser.y += laser.speed;
+        drawLaser(laser, 'magenta');
+
+        if (
+          laser.x < ship.x + ship.width &&
+          laser.x + 4 > ship.x &&
+          laser.y < ship.y + ship.height &&
+          laser.y + 10 > ship.y
+        ) {
+          enemyLasers.splice(i, 1);
+          loseLife();
+        }
+      });
+
+      // Bombs
+      bombs.forEach((bomb, i) => {
+        bomb.y += bomb.speed;
+        drawBomb(bomb);
+        if (bomb.y > canvas.height) bombs.splice(i, 1);
+      });
+
+      drawShip();
+      requestAnimationFrame(update);
+    }
+
+    function loseLife() {
+      lives--;
+      livesEl.textContent = lives;
+      if (lives <= 0) endGame();
+    }
+
+    function endGame() {
+      gameOver = true;
+      if (score > highScore) {
+        highScore = score;
+        highScoreEl.textContent = highScore;
+      }
+      restartBtn.style.display = 'inline-block';
+    }
+
+    function restartGame() {
+      gameOver = false;
+      lasers = [];
+      enemyLasers = [];
+      enemies = [];
+      bombs = [];
+      score = 0;
+      lives = 3;
+      ship.x = canvas.width / 2 - 20;
+      ship.y = canvas.height - 60;
+      ship.cooldown = 0;
+      enemySpeed = 1.2;
+      enemySpawnRate = 2000;
+      scoreEl.textContent = score;
+      livesEl.textContent = lives;
+      restartBtn.style.display = 'none';
+      loopEnemySpawner();
+      update();
+    }
+
+    function loopEnemySpawner() {
+      if (gameOver) return;
+      spawnEnemy();
+      if (enemySpawnRate > 500) enemySpawnRate -= 30;
+      if (enemySpeed < 5) enemySpeed += 0.05;
+      setTimeout(loopEnemySpawner, enemySpawnRate);
+    }
+
+    document.addEventListener('keydown', e => keys[e.key] = true);
+    document.addEventListener('keyup', e => keys[e.key] = false);
+    restartBtn.addEventListener('click', restartGame);
+
+    playBtn.addEventListener('click', () => {
+      playBtn.style.display = 'none'; // Hide the play button
+      update();
+      loopEnemySpawner();
+    });
+  </script>
+</body>
+</html>
